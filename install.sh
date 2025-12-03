@@ -1,61 +1,87 @@
 #!/usr/bin/env bash
+
+# ====== Színek ======
+RED='\033[1;31m'
+GREEN='\033[1;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[1;34m'
+CYAN='\033[1;36m'
+NC='\033[0m' # No Color
+
+msg() { echo -e "${CYAN}[*]${NC} $1"; }
+ok()  { echo -e "${GREEN}[OK]${NC} $1"; }
+err() { echo -e "${RED}[ERR]${NC} $1"; }
+
 set -e
 
-echo "== Node-RED + Apache2 + MariaDB + phpMyAdmin telepítő =="
+echo -e "${BLUE}== Node-RED + Apache2 + MariaDB + phpMyAdmin telepítő ==${NC}"
 
+# --- Root ellenőrzés ---
 if [[ $EUID -ne 0 ]]; then
-  echo "Ezt a scriptet rootként kell futtatni. Használd így: sudo bash install.sh"
+  err "Ezt a scriptet rootként kell futtatni. Használd így:  sudo bash install.sh"
   exit 1
 fi
 
-echo "-> Csomaglista frissítése..."
-apt update
-apt upgrade -y
+# --- Rendszer frissítés ---
+msg "Rendszer frissítése (apt-get update && apt-get upgrade)..."
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -y
+apt-get upgrade -y
+ok "Rendszer sikeresen frissítve."
 
-echo "-> Alap eszközök telepítése (curl, wget, unzip)..."
-apt install -y curl wget unzip
+# --- Alap eszközök ---
+msg "Alap eszközök telepítése (curl, wget, unzip)..."
+apt-get install -y curl wget unzip
+ok "Alap eszközök telepítve."
 
-echo "-> Node-RED és Node.js telepítése (Node-RED hivatalos installer)..."
-bash <(curl -sL https://github.com/node-red/linux-installers/releases/latest/download/update-nodejs-and-nodered-deb)
+# --- Node-RED telepítés (hivatalos script, automatikus jóváhagyással) ---
+msg "Node-RED és Node.js telepítése (Node-RED hivatalos installer)..."
+bash <(curl -sL https://github.com/node-red/linux-installers/releases/latest/download/update-nodejs-and-nodered-deb) \
+  --confirm-root --confirm-install --skip-pi
+ok "Node-RED telepítve és beállítva."
 
-echo "-> Node-RED szolgáltatás engedélyezése és indítása..."
-systemctl enable nodered.service
-systemctl start nodered.service
+# --- Apache2, MariaDB, PHP ---
+msg "Apache2, MariaDB és PHP telepítése..."
+apt-get install -y apache2 mariadb-server php libapache2-mod-php php-mysql
+ok "Apache2, MariaDB, PHP telepítve."
 
-echo "-> Apache2, MariaDB, PHP telepítése..."
-apt install -y apache2 mariadb-server php libapache2-mod-php php-mysql
-
-echo "-> Apache2 és MariaDB engedélyezése és indítása..."
+msg "Apache2 és MariaDB szolgáltatások engedélyezése és indítása..."
 systemctl enable apache2
 systemctl enable mariadb
 systemctl start apache2
 systemctl start mariadb
+ok "Apache2 és MariaDB fut."
 
-echo "-> MariaDB felhasználó létrehozása (user / user123)..."
+# --- MariaDB user létrehozása ---
+msg "MariaDB felhasználó létrehozása (user / user123)..."
 mysql -u root <<EOF
 CREATE USER IF NOT EXISTS 'user'@'localhost' IDENTIFIED BY 'user123';
 GRANT ALL PRIVILEGES ON *.* TO 'user'@'localhost' WITH GRANT OPTION;
 FLUSH PRIVILEGES;
 EOF
+ok "MariaDB user létrehozva (user / user123)."
 
-echo "-> phpMyAdmin letöltése és telepítése..."
+# --- phpMyAdmin letöltése és telepítése ---
+msg "phpMyAdmin letöltése..."
 cd /tmp
 wget -O phpmyadmin.zip https://www.phpmyadmin.net/downloads/phpMyAdmin-latest-all-languages.zip
 unzip -q phpmyadmin.zip
 rm phpmyadmin.zip
 
-echo "-> Régi /usr/share/phpmyadmin törlése (ha volt)..."
+msg "Régi /usr/share/phpmyadmin törlése (ha létezett)..."
 rm -rf /usr/share/phpmyadmin
 
-echo "-> phpMyAdmin áthelyezése a végleges helyére..."
+msg "phpMyAdmin áthelyezése végleges helyére..."
 mv phpMyAdmin-*-all-languages /usr/share/phpmyadmin
 
-echo "-> phpMyAdmin tmp mappa, jogosultságok beállítása..."
+msg "phpMyAdmin tmp könyvtár és jogosultságok beállítása..."
 mkdir -p /usr/share/phpmyadmin/tmp
 chown -R www-data:www-data /usr/share/phpmyadmin
 chmod 777 /usr/share/phpmyadmin/tmp
+ok "phpMyAdmin könyvtárak beállítva."
 
-echo "-> Apache2 konfiguráció létrehozása phpMyAdminhoz..."
+# --- Apache konfig phpMyAdminhoz ---
+msg "Apache2 konfiguráció létrehozása phpMyAdminhoz..."
 cat >/etc/apache2/conf-available/phpmyadmin.conf <<'APACHECONF'
 Alias /phpmyadmin /usr/share/phpmyadmin
 
@@ -69,12 +95,11 @@ APACHECONF
 
 a2enconf phpmyadmin
 
-echo "-> Minimális phpMyAdmin config.inc.php létrehozása..."
+# --- phpMyAdmin alap config ---
+msg "phpMyAdmin config.inc.php létrehozása..."
 cat >/usr/share/phpmyadmin/config.inc.php <<'PHPCONF'
 <?php
-/* MINIMÁLIS phpMyAdmin konfiguráció */
-$cfg['blowfish_secret'] = 'ValamiNagyonHosszúEsVéletlenszerűJelsorozat1234567890'; /* LEGALÁBB 32 KARAKTER! */
-
+$cfg['blowfish_secret'] = 'ValamiNagyonHosszúEsVéletlenszerűJelsorozat1234567890';
 $i = 0;
 $i++;
 $cfg['Servers'][$i]['auth_type'] = 'cookie';
@@ -83,21 +108,21 @@ $cfg['Servers'][$i]['compress'] = false;
 $cfg['Servers'][$i]['AllowNoPassword'] = false;
 PHPCONF
 
-echo "-> Apache újratöltése..."
+# --- Apache újratöltése ---
+msg "Apache2 újratöltése..."
 systemctl reload apache2
+ok "Apache2 újratöltve."
 
 echo
-echo "==============================="
-echo "TELEPÍTÉS KÉSZ!"
+echo -e "${GREEN}==============================${NC}"
+echo -e "${GREEN} TELEPÍTÉS KÉSZ!${NC}"
+echo -e "${YELLOW} Node-RED:    ${NC}http://<szerver-ip>:1880"
+echo -e "${YELLOW} phpMyAdmin:  ${NC}http://<szerver-ip>/phpmyadmin"
 echo
-echo "Node-RED:"
-echo "  URL:  http://<szerver-ip>:1880"
+echo -e "${CYAN} MariaDB belépés phpMyAdminban:${NC}"
+echo -e "   Felhasználó: ${YELLOW}user${NC}"
+echo -e "   Jelszó:      ${YELLOW}user123${NC}"
 echo
-echo "phpMyAdmin:"
-echo "  URL:  http://<szerver-ip>/phpmyadmin"
-echo "  Bejelentkezésre használd a MariaDB felhasználót:"
-echo "    Felhasználó: user"
-echo "    Jelszó:      user123"
+echo -e "${RED}FONTOS:${NC} éles rendszeren AZONNAL változtasd meg a user123 jelszót!"
+echo -e "${GREEN}==============================${NC}"
 echo
-echo "FONTOS: éles rendszeren AZONNAL változtasd meg a user123 jelszót!"
-echo "==============================="
