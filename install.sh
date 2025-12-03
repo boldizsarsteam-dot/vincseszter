@@ -20,9 +20,9 @@ set -e
 export DEBIAN_FRONTEND=noninteractive
 
 echo -e "${MAGENTA}"
-echo '╔══════════════════════════════════════════════════════╗'
-echo '║  Node-RED + Apache2 + MariaDB + phpMyAdmin telepítő  ║'
-echo '╚══════════════════════════════════════════════════════╝'
+echo '╔════════════════════════════════════════════════════════════╗'
+echo '║  Node-RED + Apache2 + MariaDB + phpMyAdmin + MQTT + mc + nmon  ║'
+echo '╚════════════════════════════════════════════════════════════╝'
 echo -e "${NC}"
 
 # --- Root ellenőrzés ---
@@ -71,7 +71,6 @@ fi
 
 if [[ $HAS_NODE -eq 1 && $HAS_NPM -eq 1 ]]; then
   echo -e "${CYAN}[*] Node-RED telepítése npm-mel (globálisan)...${NC}"
-  # ha itt valami gond van, NE álljon le a teljes script
   set +e
   npm install -g --unsafe-perm node-red
   NODERED_RC=$?
@@ -157,7 +156,33 @@ systemctl reload apache2
 echo -e "${CHECK} phpMyAdmin beállítva (http://<szerver-ip>/phpmyadmin)."
 
 #########################################
-#  7️⃣ Összefoglaló
+#  7️⃣ MQTT szerver (Mosquitto)
+#########################################
+echo -e "${CYAN}[*] Mosquitto MQTT szerver telepítése...${NC}"
+apt-get install -y mosquitto mosquitto-clients
+
+# egyszerű fejlesztői config: 1883 port, anonymous ON (LAN tesztre oké)
+mkdir -p /etc/mosquitto/conf.d
+cat >/etc/mosquitto/conf.d/local.conf <<'MQTTCONF'
+listener 1883
+allow_anonymous true
+MQTTCONF
+
+systemctl enable mosquitto
+systemctl restart mosquitto
+echo -e "${CHECK} Mosquitto MQTT fut a ${YELLOW}1883${NC} porton (anonymous enabled)."
+
+#########################################
+#  8️⃣ mc és nmon telepítése
+#########################################
+echo -e "${CYAN}[*] mc (Midnight Commander) és nmon telepítése...${NC}"
+apt-get install -y mc nmon
+echo -e "${CHECK} mc és nmon telepítve."
+echo -e "    mc indítása: ${YELLOW}mc${NC}"
+echo -e "  nmon indítása: ${YELLOW}nmon${NC}"
+
+#########################################
+#  9️⃣ Összefoglaló
 #########################################
 echo
 echo -e "${BLUE}╔═══════════════════════════════════════════════╗${NC}"
@@ -171,5 +196,12 @@ echo -e "${GREEN}phpMyAdmin:${NC}  http://<szerver-ip>/phpmyadmin"
 echo -e "  MariaDB user: ${YELLOW}user${NC}"
 echo -e "  Jelszó:       ${YELLOW}user123${NC}"
 echo
-echo -e "${RED}⚠ FONTOS:${NC} éles rendszeren VÁLTOZTASD MEG a jelszót!"
+echo -e "${GREEN}MQTT (Mosquitto):${NC}  host: <szerver-ip>  port: ${YELLOW}1883${NC}"
+echo -e "  (fejlesztéshez anonymous engedélyezve)"
+echo
+echo -e "${GREEN}mc:${NC}   parancs: ${YELLOW}mc${NC}"
+echo -e "${GREEN}nmon:${NC} parancs: ${YELLOW}nmon${NC}"
+echo
+echo -e "${RED}⚠ FONTOS:${NC} éles rendszeren VÁLTOZTASD MEG a MariaDB jelszót,"
+echo -e "          és az MQTT-n ÉRDEMES kikapcsolni az anonymous-t!"
 echo
