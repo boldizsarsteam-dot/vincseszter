@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 
 #########################################
-#  🌈 FULL COLOR NODE-RED INSTALLER 🌈  #
+#  🌈 SIMPLE & COLORFUL INSTALLER 🌈    #
 #########################################
 
-# ====== Színek és ikonok ======
+# ====== Színek ======
 RED='\033[1;31m'
 GREEN='\033[1;32m'
 YELLOW='\033[1;33m'
@@ -17,55 +17,76 @@ CROSS="${RED}✗${NC}"
 WARN="${YELLOW}!${NC}"
 
 set -e
+export DEBIAN_FRONTEND=noninteractive
 
 echo -e "${MAGENTA}"
-echo '╔════════════════════════════════════════════════════════════════╗'
-echo '║     🚀  Node-RED + Apache2 + MariaDB + phpMyAdmin Installer    ║'
-echo '╚════════════════════════════════════════════════════════════════╝'
+echo '╔══════════════════════════════════════════════════════╗'
+echo '║  Node-RED + Apache2 + MariaDB + phpMyAdmin telepítő  ║'
+echo '╚══════════════════════════════════════════════════════╝'
 echo -e "${NC}"
 
 # --- Root ellenőrzés ---
 if [[ $EUID -ne 0 ]]; then
-  echo -e "${CROSS} ${RED}Ezt a scriptet rootként kell futtatni!${NC}"
+  echo -e "${CROSS} Ezt a scriptet rootként kell futtatni!"
   echo "Használd így: sudo bash install.sh"
   exit 1
 fi
 
-export DEBIAN_FRONTEND=noninteractive
-
 #########################################
 #  1️⃣ Rendszer frissítés
 #########################################
-echo -e "${CYAN}[*] Rendszer frissítése...${NC}"
-apt-get update -y && apt-get upgrade -y
-echo -e "${CHECK} Rendszer frissítve!"
+echo -e "${CYAN}[*] Rendszer frissítése (apt-get update && upgrade)...${NC}"
+apt-get update -y
+apt-get upgrade -y
+echo -e "${CHECK} Rendszer frissítve."
 
 #########################################
-#  2️⃣ Alap eszközök
+#  2️⃣ Alap csomagok
 #########################################
-echo -e "${CYAN}[*] Alap eszközök telepítése...${NC}"
-apt-get install -y curl wget gnupg lsb-release ca-certificates unzip
-echo -e "${CHECK} Alap eszközök telepítve!"
+echo -e "${CYAN}[*] Alap eszközök telepítése (curl, wget, unzip, ca-certificates)...${NC}"
+apt-get install -y curl wget unzip ca-certificates gnupg lsb-release
+echo -e "${CHECK} Alap csomagok telepítve."
 
 #########################################
-#  3️⃣ Node.js 20.x + Node-RED (NPM-ből)
+#  3️⃣ Node.js / npm ellenőrzés + Node-RED
 #########################################
-echo -e "${CYAN}[*] Node.js 20.x hivatalos NodeSource telepítése...${NC}"
+echo -e "${CYAN}[*] Node.js / npm ellenőrzése...${NC}"
 
-# régi node eltávolítása, ha hibás
-apt-get purge -y nodejs npm || true
-rm -rf /etc/apt/sources.list.d/nodesource.list* || true
+HAS_NODE=0
+HAS_NPM=0
 
-# NodeSource repo
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+if command -v node >/dev/null 2>&1; then
+  echo -e "${CHECK} Node.js megtalálva: ${YELLOW}$(node -v)${NC}"
+  HAS_NODE=1
+else
+  echo -e "${WARN} Node.js NINCS telepítve."
+fi
 
-# telepítés
-apt-get install -y nodejs
-echo -e "${CHECK} Node.js $(node -v) és npm $(npm -v) telepítve!"
+if command -v npm >/dev/null 2>&1; then
+  echo -e "${CHECK} npm megtalálva: ${YELLOW}$(npm -v)${NC}"
+  HAS_NPM=1
+else
+  echo -e "${WARN} npm NINCS telepítve."
+fi
 
-echo -e "${CYAN}[*] Node-RED telepítése npm segítségével...${NC}"
-npm install -g --unsafe-perm node-red
-echo -e "${CHECK} Node-RED telepítve globálisan!"
+if [[ $HAS_NODE -eq 1 && $HAS_NPM -eq 1 ]]; then
+  echo -e "${CYAN}[*] Node-RED telepítése npm-mel (globálisan)...${NC}"
+  # ha itt valami gond van, NE álljon le a teljes script
+  set +e
+  npm install -g --unsafe-perm node-red
+  NODERED_RC=$?
+  set -e
+  if [[ $NODERED_RC -eq 0 ]]; then
+    echo -e "${CHECK} Node-RED sikeresen telepítve (npm -g node-red)."
+  else
+    echo -e "${WARN} Node-RED telepítése NEM sikerült. Később kézzel futtasd:"
+    echo -e "     ${YELLOW}npm install -g --unsafe-perm node-red${NC}"
+  fi
+else
+  echo -e "${WARN} Node-RED telepítése kihagyva, mert nincs teljes Node.js + npm."
+  echo -e "     Telepíts Node.js-t külön, majd futtasd:"
+  echo -e "     ${YELLOW}npm install -g --unsafe-perm node-red${NC}"
+fi
 
 #########################################
 #  4️⃣ Apache2 + MariaDB + PHP
@@ -75,34 +96,42 @@ apt-get install -y apache2 mariadb-server php libapache2-mod-php php-mysql \
   php-mbstring php-zip php-gd php-json php-curl
 systemctl enable apache2 mariadb
 systemctl start apache2 mariadb
-echo -e "${CHECK} Apache2 és MariaDB fut."
+echo -e "${CHECK} Apache2 és MariaDB telepítve és fut."
 
 #########################################
 #  5️⃣ MariaDB user létrehozása
 #########################################
-echo -e "${CYAN}[*] MariaDB user létrehozása (user / user123)...${NC}"
+echo -e "${CYAN}[*] MariaDB felhasználó létrehozása (user / user123)...${NC}"
 mysql -u root <<EOF
 CREATE USER IF NOT EXISTS 'user'@'localhost' IDENTIFIED BY 'user123';
 GRANT ALL PRIVILEGES ON *.* TO 'user'@'localhost' WITH GRANT OPTION;
 FLUSH PRIVILEGES;
 EOF
-echo -e "${CHECK} MariaDB felhasználó kész."
+echo -e "${CHECK} MariaDB user létrehozva (user / user123)."
 
 #########################################
 #  6️⃣ phpMyAdmin telepítés
 #########################################
-echo -e "${CYAN}[*] phpMyAdmin letöltése és beállítása...${NC}"
+echo -e "${CYAN}[*] phpMyAdmin letöltése és telepítése...${NC}"
 cd /tmp
 wget -O phpmyadmin.zip https://www.phpmyadmin.net/downloads/phpMyAdmin-latest-all-languages.zip
-unzip -q phpmyadmin.zip && rm phpmyadmin.zip
+unzip -q phpmyadmin.zip
+rm phpmyadmin.zip
+
+echo -e "${CYAN}[*] Régi /usr/share/phpmyadmin törlése (ha volt)...${NC}"
 rm -rf /usr/share/phpmyadmin
+
 mv phpMyAdmin-*-all-languages /usr/share/phpmyadmin
+
 mkdir -p /usr/share/phpmyadmin/tmp
 chown -R www-data:www-data /usr/share/phpmyadmin
 chmod 777 /usr/share/phpmyadmin/tmp
+echo -e "${CHECK} phpMyAdmin könyvtárak beállítva."
 
+echo -e "${CYAN}[*] Apache2 konfiguráció létrehozása phpMyAdminhoz...${NC}"
 cat >/etc/apache2/conf-available/phpmyadmin.conf <<'APACHECONF'
 Alias /phpmyadmin /usr/share/phpmyadmin
+
 <Directory /usr/share/phpmyadmin>
     Options FollowSymLinks
     DirectoryIndex index.php
@@ -110,8 +139,10 @@ Alias /phpmyadmin /usr/share/phpmyadmin
     Require all granted
 </Directory>
 APACHECONF
+
 a2enconf phpmyadmin
 
+echo -e "${CYAN}[*] phpMyAdmin config.inc.php létrehozása...${NC}"
 cat >/usr/share/phpmyadmin/config.inc.php <<'PHPCONF'
 <?php
 $cfg['blowfish_secret'] = 'RandomStrongSecretKeyForPhpMyAdmin123456789!';
@@ -123,22 +154,22 @@ $cfg['Servers'][$i]['AllowNoPassword'] = false;
 PHPCONF
 
 systemctl reload apache2
-echo -e "${CHECK} phpMyAdmin elérhető: http://<ip>/phpmyadmin"
+echo -e "${CHECK} phpMyAdmin beállítva (http://<szerver-ip>/phpmyadmin)."
 
 #########################################
 #  7️⃣ Összefoglaló
 #########################################
 echo
-echo -e "${BLUE}╔═════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║               ✅  TELEPÍTÉS KÉSZ! ✅                 ║${NC}"
-echo -e "${BLUE}╚═════════════════════════════════════════════════════╝${NC}"
+echo -e "${BLUE}╔═══════════════════════════════════════════════╗${NC}"
+echo -e "${BLUE}║               ✅ TELEPÍTÉS KÉSZ ✅             ║${NC}"
+echo -e "${BLUE}╚═══════════════════════════════════════════════╝${NC}"
 echo
-echo -e "${GREEN}Node-RED:${NC}    http://<szerver-ip>:1880"
-echo -e "${YELLOW}Indítás kézzel:${NC}  node-red"
-echo -e "${YELLOW}Szolgáltatásként:${NC} systemctl enable --now node-red"
+echo -e "${GREEN}Node-RED (ha sikerült a telepítés):${NC}  http://<szerver-ip>:1880"
+echo -e "${YELLOW}Indítás:${NC}  node-red"
 echo
-echo -e "${GREEN}phpMyAdmin:${NC} http://<szerver-ip>/phpmyadmin"
-echo -e "${YELLOW}Bejelentkezés:${NC} user / user123"
+echo -e "${GREEN}phpMyAdmin:${NC}  http://<szerver-ip>/phpmyadmin"
+echo -e "  MariaDB user: ${YELLOW}user${NC}"
+echo -e "  Jelszó:       ${YELLOW}user123${NC}"
 echo
-echo -e "${RED}⚠ FONTOS:${NC} Éles rendszeren AZONNAL változtasd meg a jelszót!"
+echo -e "${RED}⚠ FONTOS:${NC} éles rendszeren VÁLTOZTASD MEG a jelszót!"
 echo
