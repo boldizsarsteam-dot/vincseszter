@@ -34,11 +34,13 @@ msg "Alap eszközök telepítése (curl, wget, unzip)..."
 apt-get install -y curl wget unzip
 ok "Alap eszközök telepítve."
 
-# --- Node-RED telepítés (hivatalos script, automatikus jóváhagyással) ---
-msg "Node-RED és Node.js telepítése (Node-RED hivatalos installer)..."
-bash <(curl -sL https://github.com/node-red/linux-installers/releases/latest/download/update-nodejs-and-nodered-deb) \
-  --confirm-root --confirm-install --skip-pi
-ok "Node-RED telepítve és beállítva."
+# --- Node-RED telepítés (automatikusan, kérdések nélkül) ---
+msg "Node-RED és Node.js telepítése (automatikus, non-interactive)..."
+curl -sL https://github.com/node-red/linux-installers/releases/latest/download/update-nodejs-and-nodered-deb \
+  -o /tmp/nodered-install.sh
+export DEBIAN_FRONTEND=noninteractive
+yes | bash /tmp/nodered-install.sh --confirm-root --confirm-install --skip-pi --nocolors || true
+ok "Node-RED telepítve és beállítva (non-interactive)."
 
 # --- Apache2, MariaDB, PHP ---
 msg "Apache2, MariaDB és PHP telepítése..."
