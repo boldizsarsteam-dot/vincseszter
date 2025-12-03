@@ -54,7 +54,8 @@ echo -e "${CYAN}Többet is megadhatsz szóközzel elválasztva, pl.:${NC}  ${YEL
 echo -e "${CYAN}Mindent telepíteni:${NC} ${YELLOW}0${NC}"
 echo
 
-read -rp "Választás (pl. 0 vagy 1 2 5): " CHOICES
+# FONTOS: /dev/tty-ról olvasunk, hogy működjön curl | bash esetén is
+read -rp "Választás (pl. 0 vagy 1 2 5): " CHOICES </dev/tty || CHOICES=""
 
 if echo "$CHOICES" | grep -qw "0"; then
   INSTALL_NODE_RED=1
