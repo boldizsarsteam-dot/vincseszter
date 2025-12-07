@@ -5,11 +5,12 @@
 #########################################
 
 # ====== Verzió / changelog ======
-SCRIPT_VERSION="v1.1.0"
+SCRIPT_VERSION="v1.2.0"
 SCRIPT_CHANGELOG=(
   "- Új: 'Csak frissítés (update mód)' menüpont (7)"
   "- Új: Rendszer / környezet infó kiírása induláskor"
   "- Új: Verzió- és changelog kijelzése a fejléc alatt"
+  "- Új: Teljes eltávolítás (UNINSTALL mód) menüpont (8)"
 )
 
 # ====== Színek ======
@@ -167,7 +168,7 @@ IP_ADDR=$(hostname -I 2>/dev/null | awk '{print $1}')
 print_system_info
 
 #########################################
-#  MENÜ – MIT TELEPÍTSEN A SCRIPT?
+#  MENÜ – MIT CSINÁLJON A SCRIPT?
 #########################################
 
 INSTALL_NODE_RED=0
@@ -177,8 +178,9 @@ INSTALL_MC=0
 INSTALL_NMON=0
 DO_HARDEN=0             # Security hardening (MariaDB+MQTT)
 UPDATE_ONLY=0           # Csak frissítés mód
+UNINSTALL_MODE=0        # Teljes eltávolítás mód
 
-echo -e "${CYAN}Mit szeretnél telepíteni?${NC}"
+echo -e "${CYAN}Mit szeretnél csinálni?${NC}"
 echo -e "  ${YELLOW}0${NC} - MINDENT telepít (hardening nélkül)"
 echo -e "  ${YELLOW}1${NC} - Node-RED (ha van node + npm)"
 echo -e "  ${YELLOW}2${NC} - Apache2 + MariaDB + PHP + phpMyAdmin"
@@ -187,10 +189,12 @@ echo -e "  ${YELLOW}4${NC} - mc (Midnight Commander)"
 echo -e "  ${YELLOW}5${NC} - nmon (rendszer monitor)"
 echo -e "  ${YELLOW}6${NC} - Security hardening (MariaDB jelszó + MQTT auth)"
 echo -e "  ${YELLOW}7${NC} - Csak frissítés (update mód, NINCS új telepítés)"
+echo -e "  ${YELLOW}8${NC} - Teljes eltávolítás (UNINSTALL mód – mindent leszed)"
 echo
 echo -e "${CYAN}Többet is megadhatsz szóközzel elválasztva, pl.:${NC}  ${YELLOW}1 3 4${NC}"
-echo -e "${CYAN}Mindent (telepítés):${NC} ${YELLOW}0${NC}, hardeninghez add hozzá a 6-ost is (pl. 0 6)"
+echo -e "${CYAN}Mindent telepíteni:${NC} ${YELLOW}0${NC}, hardeninghez add hozzá a 6-ost is (pl. 0 6)"
 echo -e "${CYAN}Csak frissítéshez:${NC} ${YELLOW}7${NC}"
+echo -e "${CYAN}Teljes törléshez:${NC} ${YELLOW}8${NC}"
 echo
 
 # /dev/tty-ról olvasunk, hogy curl | bash esetén is működjön
@@ -213,10 +217,25 @@ for c in $CHOICES; do
     5) INSTALL_NMON=1 ;;
     6) DO_HARDEN=1 ;;
     7) UPDATE_ONLY=1 ;;
+    8) UNINSTALL_MODE=1 ;;
     0) ;; # már kezeltük
     *) warn "Ismeretlen opció: $c (kihagyva)" ;;
   esac
 done
+
+# Ha uninstall mód be van kapcsolva, az felülír mindent
+if [[ $UNINSTALL_MODE -eq 1 ]]; then
+  if [[ $UPDATE_ONLY -eq 1 ]] || [[ $INSTALL_NODE_RED -eq 1 || $INSTALL_LAMP -eq 1 || $INSTALL_MQTT -eq 1 || $INSTALL_MC -eq 1 || $INSTALL_NMON -eq 1 || $DO_HARDEN -eq 1 ]]; then
+    warn "A 8-as (UNINSTALL mód) más opciókkal együtt lett megadva – a többi opciót figyelmen kívül hagyom, csak törölni fogok."
+  fi
+  INSTALL_NODE_RED=0
+  INSTALL_LAMP=0
+  INSTALL_MQTT=0
+  INSTALL_MC=0
+  INSTALL_NMON=0
+  DO_HARDEN=0
+  UPDATE_ONLY=0
+fi
 
 # Ha csak update módot választott, de mellette mást is, akkor az update módot ignoráljuk
 if [[ $UPDATE_ONLY -eq 1 ]] && \
@@ -225,8 +244,8 @@ if [[ $UPDATE_ONLY -eq 1 ]] && \
   UPDATE_ONLY=0
 fi
 
-# Ha semmit nem választott, és update mód sincs
-if [[ $INSTALL_NODE_RED -eq 0 && $INSTALL_LAMP -eq 0 && $INSTALL_MQTT -eq 0 && $INSTALL_MC -eq 0 && $INSTALL_NMON -eq 0 && $DO_HARDEN -eq 0 && $UPDATE_ONLY -eq 0 ]]; then
+# Ha semmit nem választott, és update/uninstall mód sincs
+if [[ $INSTALL_NODE_RED -eq 0 && $INSTALL_LAMP -eq 0 && $INSTALL_MQTT -eq 0 && $INSTALL_MC -eq 0 && $INSTALL_NMON -eq 0 && $DO_HARDEN -eq 0 && $UPDATE_ONLY -eq 0 && $UNINSTALL_MODE -eq 0 ]]; then
   err "Nem választottál semmit, kilépek."
   exit 0
 fi
@@ -272,6 +291,67 @@ if [[ $UPDATE_ONLY -eq 1 ]]; then
   echo -e "${BLUE}╚═══════════════════════════════════════════════╝${NC}"
   echo
   echo "Log fájl: $LOGFILE"
+  echo
+  exit 0
+fi
+
+#########################################
+#  KÜLÖN: TELJES ELTÁVOLÍTÁS (UNINSTALL MÓD)
+#########################################
+if [[ $UNINSTALL_MODE -eq 1 ]]; then
+  echo
+  msg "TELJES ELTÁVOLÍTÁS (UNINSTALL mód) kiválasztva – mindent törlök, amit ez a script felrakott."
+
+  TOTAL_STEPS=4
+  CURRENT_STEP=0
+
+  step "Szolgáltatások leállítása (apache2, mariadb, mosquitto, node-red)"
+  systemctl stop apache2 2>/dev/null || true
+  systemctl stop mariadb 2>/dev/null || true
+  systemctl stop mosquitto 2>/dev/null || true
+  systemctl stop node-red 2>/dev/null || true
+  ok "Szolgáltatások leállítva (amelyek léteztek)."
+
+  step "MariaDB user törlése (user@localhost)"
+  set +e
+  mysql -u root <<EOF
+DROP USER IF EXISTS 'user'@'localhost';
+FLUSH PRIVILEGES;
+EOF
+  set -e
+  ok "MariaDB user (user@localhost) törölve (ha létezett)."
+
+  step "Node-RED eltávolítása npm-ből"
+  set +e
+  npm uninstall -g node-red &>/dev/null || true
+  set -e
+  ok "Node-RED npm csomag eltávolítva (ha telepítve volt)."
+
+  step "phpMyAdmin és Mosquitto extra configok törlése"
+  rm -rf /usr/share/phpmyadmin
+  rm -f /etc/apache2/conf-available/phpmyadmin.conf
+  rm -f /etc/apache2/conf-enabled/phpmyadmin.conf
+  rm -f /etc/mosquitto/conf.d/local.conf
+  ok "phpMyAdmin könyvtár és extra Mosquitto config törölve (ha léteztek)."
+
+  step "Csomagok purge-ölése + autoremove"
+  apt-get purge -y apache2 apache2-bin apache2-data apache2-utils \
+    mariadb-server mariadb-client \
+    mosquitto mosquitto-clients \
+    mc nmon \
+    php libapache2-mod-php php-mysql php-mbstring php-zip php-gd php-json php-curl || true
+  apt-get autoremove -y || true
+  apt-get autoclean -y || true
+  ok "Apache2, MariaDB, Mosquitto, mc, nmon, PHP csomagok törölve (ha voltak)."
+
+  echo
+  echo -e "${BLUE}╔═══════════════════════════════════════════════╗${NC}"
+  echo -e "${BLUE}║        ✅ TELJES ELTÁVOLÍTÁS KÉSZ ✅          ║${NC}"
+  echo -e "${BLUE}╚═══════════════════════════════════════════════╝${NC}"
+  echo
+  echo "Log fájl: $LOGFILE"
+  echo
+  echo -e "${YELLOW}Most újra futtathatod a telepítést, mintha szűz gép lenne (Node.js/npm kivételével).${NC}"
   echo
   exit 0
 fi
@@ -655,68 +735,5 @@ echo
 echo -e "${CYAN}Health check:${NC}"
 if [[ $INSTALL_LAMP -eq 1 ]]; then
   check_port 80 "Apache2 (HTTP)"
-fi
-if [[ $INSTALL_MQTT -eq 1 ]]; then
-  check_port 1883 "MQTT (Mosquitto)"
-fi
-
-#########################################
-#  Summary table
-#########################################
-echo
-echo -e "${BLUE}+----------------+-----------------------------+${NC}"
-echo -e "${BLUE}| Szolgáltatás   | Elérés / Megjegyzés        |${NC}"
-echo -e "${BLUE}+----------------+-----------------------------+${NC}"
-
-if [[ $INSTALL_NODE_RED -eq 1 ]]; then
-  echo -e "| Node-RED       | http://$IP_ADDR:1880       |"
-fi
-if [[ $INSTALL_LAMP -eq 1 ]]; then
-  echo -e "| Dashboard      | http://$IP_ADDR/           |"
-  echo -e "| phpMyAdmin     | http://$IP_ADDR/phpmyadmin |"
-fi
-if [[ $INSTALL_MQTT -eq 1 ]]; then
-  echo -e "| MQTT broker    | $IP_ADDR:1883              |"
-fi
-if [[ $INSTALL_MC -eq 1 ]]; then
-  echo -e "| mc             | parancs: mc                |"
-fi
-if [[ $INSTALL_NMON -eq 1 ]]; then
-  echo -e "| nmon           | parancs: nmon              |"
-fi
-
-echo -e "${BLUE}+----------------+-----------------------------+${NC}"
-
-#########################################
-#  Összefoglaló + pro tipp
-#########################################
-echo
-echo -e "${BLUE}╔═══════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║               ✅ TELEPÍTÉS KÉSZ ✅             ║${NC}"
-echo -e "${BLUE}╚═══════════════════════════════════════════════╝${NC}"
-echo
-echo "Log fájl: $LOGFILE"
-echo
-
-if [[ $INSTALL_LAMP -eq 1 ]]; then
-  echo -e "${RED}⚠ FONTOS:${NC} éles rendszeren VÁLTOZTASD MEG a MariaDB jelszót (user123)!"
-fi
-
-if [[ $INSTALL_MQTT -eq 1 ]]; then
-  echo -e "${RED}⚠ MQTT:${NC} éles rendszeren NE hagyd anonymous módban a Mosquittót!"
-fi
-
-echo
-
-TIPS=(
-  "Tipp: csinálj alias-t: alias vincs='curl -sL https://raw.githubusercontent.com/boldizsarsteam-dot/vincseszter/main/install.sh | sudo bash'"
-  "Tipp: Node-RED-et érdemes systemd service-ként futtatni, hogy bootkor induljon."
-  "Tipp: MQTT-hez használj user/jelszó auth-ot és TLS-t éles rendszeren."
-  "Tipp: mc-ben F10 a kilépés, F5 másol, F6 mozgat."
-  "Tipp: Vincseszter dashboard: http://$IP_ADDR/"
-  "Tipp: Csak frissítéshez elég a 7-es opciót választani a menüben."
-)
-
-RANDOM_TIP=${TIPS[$RANDOM % ${#TIPS[@]}]}
-echo -e "${YELLOW}$RANDOM_TIP${NC}"
-echo
+endif
+::contentReference[oaicite:0]{index=0}
