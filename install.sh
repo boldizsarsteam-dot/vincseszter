@@ -737,3 +737,69 @@ if [[ $INSTALL_LAMP -eq 1 ]]; then
   check_port 80 "Apache2 (HTTP)"
 endif
 ::contentReference[oaicite:0]{index=0}
+if [[ $INSTALL_MQTT -eq 1 ]]; then
+  check_port 1883 "MQTT (Mosquitto)"
+fi
+
+#########################################
+#  Summary table
+#########################################
+echo
+echo -e "${BLUE}+----------------+-----------------------------+${NC}"
+echo -e "${BLUE}| Szolgáltatás   | Elérés / Megjegyzés        |${NC}"
+echo -e "${BLUE}+----------------+-----------------------------+${NC}"
+
+if [[ $INSTALL_NODE_RED -eq 1 ]]; then
+  echo -e "| Node-RED       | http://$IP_ADDR:1880       |"
+fi
+if [[ $INSTALL_LAMP -eq 1 ]]; then
+  echo -e "| Dashboard      | http://$IP_ADDR/           |"
+  echo -e "| phpMyAdmin     | http://$IP_ADDR/phpmyadmin |"
+fi
+if [[ $INSTALL_MQTT -eq 1 ]]; then
+  echo -e "| MQTT broker    | $IP_ADDR:1883              |"
+fi
+if [[ $INSTALL_MC -eq 1 ]]; then
+  echo -e "| mc             | parancs: mc                |"
+fi
+if [[ $INSTALL_NMON -eq 1 ]]; then
+  echo -e "| nmon           | parancs: nmon              |"
+fi
+
+echo -e "${BLUE}+----------------+-----------------------------+${NC}"
+
+#########################################
+#  Összefoglaló + pro tipp
+#########################################
+echo
+echo -e "${BLUE}╔═══════════════════════════════════════════════╗${NC}"
+echo -e "${BLUE}║               ✅ TELEPÍTÉS KÉSZ ✅             ║${NC}"
+echo -e "${BLUE}╚═══════════════════════════════════════════════╝${NC}"
+echo
+echo "Log fájl: $LOGFILE"
+echo
+
+if [[ $INSTALL_LAMP -eq 1 ]]; then
+  echo -e "${RED}⚠ FONTOS:${NC} éles rendszeren VÁLTOZTASD MEG a MariaDB jelszót (user123)!"
+fi
+
+if [[ $INSTALL_MQTT -eq 1 ]]; then
+  echo -e "${RED}⚠ MQTT:${NC} éles rendszeren NE hagyd anonymous módban a Mosquittót!"
+fi
+
+echo
+
+TIPS=(
+  "Tipp: csinálj alias-t: alias vincs='curl -sL https://raw.githubusercontent.com/boldizsarsteam-dot/vincseszter/main/install.sh | sudo bash'"
+  "Tipp: Node-RED-et érdemes systemd service-ként futtatni, hogy bootkor induljon."
+  "Tipp: MQTT-hez használj user/jelszó auth-ot és TLS-t éles rendszeren."
+  "Tipp: mc-ben F10 a kilépés, F5 másol, F6 mozgat."
+  "Tipp: Vincseszter dashboard: http://$IP_ADDR/"
+  "Tipp: Csak frissítéshez elég a 7-es opciót választani a menüben."
+  "Tipp: Teljes törléshez a 8-as menüpontot válaszd."
+)
+
+RANDOM_TIP=${TIPS[$RANDOM % ${#TIPS[@]}]}
+echo -e "${YELLOW}$RANDOM_TIP${NC}"
+echo
+
