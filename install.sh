@@ -4,6 +4,14 @@
 #  🌈 INTERAKTÍV, FULL-EXTRA INSTALLER 🌈
 #########################################
 
+# ====== Verzió / changelog ======
+SCRIPT_VERSION="v1.1.0"
+SCRIPT_CHANGELOG=(
+  "- Új: 'Csak frissítés (update mód)' menüpont (7)"
+  "- Új: Rendszer / környezet infó kiírása induláskor"
+  "- Új: Verzió- és changelog kijelzése a fejléc alatt"
+)
+
 # ====== Színek ======
 RED='\033[1;31m'
 GREEN='\033[1;32m'
@@ -68,11 +76,72 @@ ok()   { echo -e "${CHECK} $1"; }
 err()  { echo -e "${CROSS} $1"; }
 warn() { echo -e "${WARN} $1"; }
 
+print_system_info() {
+  echo
+  echo -e "${CYAN}Rendszer információk:${NC}"
+
+  # OS
+  local OS_NAME="Ismeretlen"
+  local OS_VER=""
+  if [[ -f /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    OS_NAME="$NAME"
+    OS_VER="$VERSION"
+  fi
+
+  # Virtualizáció
+  local VIRT="ismeretlen"
+  if command -v systemd-detect-virt >/dev/null 2>&1; then
+    VIRT=$(systemd-detect-virt 2>/dev/null || echo "ismeretlen")
+    [[ -z "$VIRT" ]] && VIRT="nincs / bare metal"
+  fi
+
+  # CPU
+  local CPU_CORES
+  CPU_CORES=$(nproc 2>/dev/null || echo "?")
+
+  # RAM
+  local RAM_TOTAL_KB RAM_GB
+  RAM_TOTAL_KB=$(grep -i MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}')
+  if [[ -n "$RAM_TOTAL_KB" ]]; then
+    RAM_GB=$(awk "BEGIN {printf \"%.1f\", $RAM_TOTAL_KB/1024/1024}")
+  else
+    RAM_GB="ismeretlen"
+  fi
+
+  # Disk (root)
+  local ROOT_FREE_HUMAN ROOT_FREE_KB
+  ROOT_FREE_HUMAN=$(df -h / 2>/dev/null | awk 'NR==2 {print $4}')
+  ROOT_FREE_KB=$(df -k / 2>/dev/null | awk 'NR==2 {print $4}')
+
+  echo "- OS:            $OS_NAME $OS_VER"
+  echo "- Virtualizáció: $VIRT"
+  echo "- CPU magok:     $CPU_CORES"
+  echo "- RAM:           ${RAM_GB} GB"
+  echo "- Root szabad:   ${ROOT_FREE_HUMAN}"
+
+  # Figyelmeztetések
+  if [[ -n "$RAM_TOTAL_KB" ]] && (( RAM_TOTAL_KB < 1024*1024 )); then
+    warn "Kevesebb mint 1 GB RAM – Node-RED / MariaDB szűkösen futhat."
+  fi
+  if [[ -n "$ROOT_FREE_KB" ]] && (( ROOT_FREE_KB < 5*1024*1024 )); then
+    warn "Kevesebb mint 5 GB szabad hely a / kötetre – adatbázis / logok megtelhetnek."
+  fi
+  echo
+}
+
 echo -e "${MAGENTA}"
 echo '╔══════════════════════════════════════════════════════════════╗'
 echo '║  Node-RED + Apache2 + MariaDB + phpMyAdmin + MQTT + mc + nmon║'
 echo '╚══════════════════════════════════════════════════════════════╝'
 echo -e "${NC}"
+
+echo -e "${CYAN}Verzió:${NC} ${YELLOW}${SCRIPT_VERSION}${NC}"
+echo -e "${CYAN}Changelog:${NC}"
+for line in "${SCRIPT_CHANGELOG[@]}"; do
+  echo "  ${line}"
+done
 
 # --- Root ellenőrzés ---
 if [[ $EUID -ne 0 ]]; then
@@ -94,6 +163,9 @@ msg "Logolás ide: $LOGFILE"
 IP_ADDR=$(hostname -I 2>/dev/null | awk '{print $1}')
 [ -z "$IP_ADDR" ] && IP_ADDR="szerver-ip"
 
+# --- Rendszer infó kiírása ---
+print_system_info
+
 #########################################
 #  MENÜ – MIT TELEPÍTSEN A SCRIPT?
 #########################################
@@ -104,6 +176,7 @@ INSTALL_MQTT=0          # Mosquitto
 INSTALL_MC=0
 INSTALL_NMON=0
 DO_HARDEN=0             # Security hardening (MariaDB+MQTT)
+UPDATE_ONLY=0           # Csak frissítés mód
 
 echo -e "${CYAN}Mit szeretnél telepíteni?${NC}"
 echo -e "  ${YELLOW}0${NC} - MINDENT telepít (hardening nélkül)"
@@ -113,9 +186,11 @@ echo -e "  ${YELLOW}3${NC} - MQTT szerver (Mosquitto)"
 echo -e "  ${YELLOW}4${NC} - mc (Midnight Commander)"
 echo -e "  ${YELLOW}5${NC} - nmon (rendszer monitor)"
 echo -e "  ${YELLOW}6${NC} - Security hardening (MariaDB jelszó + MQTT auth)"
+echo -e "  ${YELLOW}7${NC} - Csak frissítés (update mód, NINCS új telepítés)"
 echo
 echo -e "${CYAN}Többet is megadhatsz szóközzel elválasztva, pl.:${NC}  ${YELLOW}1 3 4${NC}"
 echo -e "${CYAN}Mindent (telepítés):${NC} ${YELLOW}0${NC}, hardeninghez add hozzá a 6-ost is (pl. 0 6)"
+echo -e "${CYAN}Csak frissítéshez:${NC} ${YELLOW}7${NC}"
 echo
 
 # /dev/tty-ról olvasunk, hogy curl | bash esetén is működjön
@@ -137,18 +212,72 @@ for c in $CHOICES; do
     4) INSTALL_MC=1 ;;
     5) INSTALL_NMON=1 ;;
     6) DO_HARDEN=1 ;;
+    7) UPDATE_ONLY=1 ;;
     0) ;; # már kezeltük
     *) warn "Ismeretlen opció: $c (kihagyva)" ;;
   esac
 done
 
-if [[ $INSTALL_NODE_RED -eq 0 && $INSTALL_LAMP -eq 0 && $INSTALL_MQTT -eq 0 && $INSTALL_MC -eq 0 && $INSTALL_NMON -eq 0 ]]; then
+# Ha csak update módot választott, de mellette mást is, akkor az update módot ignoráljuk
+if [[ $UPDATE_ONLY -eq 1 ]] && \
+   [[ $INSTALL_NODE_RED -eq 1 || $INSTALL_LAMP -eq 1 || $INSTALL_MQTT -eq 1 || $INSTALL_MC -eq 1 || $INSTALL_NMON -eq 1 || $DO_HARDEN -eq 1 ]]; then
+  warn "A 7-es (csak frissítés) telepítési opciókkal együtt lett megadva, az update módot figyelmen kívül hagyom."
+  UPDATE_ONLY=0
+fi
+
+# Ha semmit nem választott, és update mód sincs
+if [[ $INSTALL_NODE_RED -eq 0 && $INSTALL_LAMP -eq 0 && $INSTALL_MQTT -eq 0 && $INSTALL_MC -eq 0 && $INSTALL_NMON -eq 0 && $DO_HARDEN -eq 0 && $UPDATE_ONLY -eq 0 ]]; then
   err "Nem választottál semmit, kilépek."
   exit 0
 fi
 
 #########################################
-#  Lépések számolása (kb. kozmetikai)
+#  KÜLÖN: CSAK FRISSÍTÉS (UPDATE MÓD)
+#########################################
+if [[ $UPDATE_ONLY -eq 1 ]]; then
+  echo
+  msg "Csak frissítés (update mód) kiválasztva – nem telepítek új komponenseket."
+
+  TOTAL_STEPS=3
+  CURRENT_STEP=0
+
+  run_with_spinner "Rendszer frissítése (apt-get update && upgrade)" \
+    bash -c 'apt-get update -y && apt-get upgrade -y'
+
+  step "Node-RED frissítése (ha telepítve npm-ből)"
+  if command -v npm >/dev/null 2>&1 && npm list -g node-red >/dev/null 2>&1; then
+    set +e
+    npm update -g node-red &>/tmp/vincs_install_step.log
+    RC=$?
+    set -e
+    if [[ $RC -eq 0 ]]; then
+      ok "Node-RED npm update sikeres."
+    else
+      warn "Node-RED npm update NEM sikerült, nézd meg a logot: $LOGFILE"
+    fi
+  else
+    warn "Node-RED nincs npm-ből telepítve, ezt a lépést kihagyom."
+  fi
+
+  step "Szolgáltatások újraindítása (Apache2, MariaDB, Mosquitto, Node-RED ha van)"
+  systemctl restart apache2 2>/dev/null || true
+  systemctl restart mariadb 2>/dev/null || true
+  systemctl restart mosquitto 2>/dev/null || true
+  systemctl restart node-red 2>/dev/null || true
+  ok "Szolgáltatások újraindítva (ha telepítve voltak)."
+
+  echo
+  echo -e "${BLUE}╔═══════════════════════════════════════════════╗${NC}"
+  echo -e "${BLUE}║          ✅ UPDATE MÓD FUTTATVA ✅            ║${NC}"
+  echo -e "${BLUE}╚═══════════════════════════════════════════════╝${NC}"
+  echo
+  echo "Log fájl: $LOGFILE"
+  echo
+  exit 0
+fi
+
+#########################################
+#  Lépések számolása (telepítés mód)
 #########################################
 TOTAL_STEPS=3  # update+upgrade, alap csomagok, vincs-install helper
 
@@ -351,7 +480,7 @@ PHPCONF
       <p>Webes felület a MariaDB adatbázis kezelésére.</p>
       <p><a href="http://$IP_ADDR/phpmyadmin" target="_blank">→ Megnyitás</a></p>
       <div class="tag">LAMP</div>
-      <p class="warn">Belépés: user / user123 (teszt környezetre)</p>
+      <p class="warn">Teszt user: <code>user / user123</code> – élesben NE hagyd így!</p>
     </div>
     <div class="card">
       <h2>MQTT broker</h2>
@@ -369,7 +498,8 @@ PHPCONF
     </div>
   </div>
   <div class="footer">
-    <p>Install script log: $LOGFILE</p>
+    <p>Install script verzió: ${SCRIPT_VERSION}</p>
+    <p>Log fájl: $LOGFILE</p>
   </div>
 </body>
 </html>
@@ -542,6 +672,7 @@ if [[ $INSTALL_NODE_RED -eq 1 ]]; then
   echo -e "| Node-RED       | http://$IP_ADDR:1880       |"
 fi
 if [[ $INSTALL_LAMP -eq 1 ]]; then
+  echo -e "| Dashboard      | http://$IP_ADDR/           |"
   echo -e "| phpMyAdmin     | http://$IP_ADDR/phpmyadmin |"
 fi
 if [[ $INSTALL_MQTT -eq 1 ]]; then
@@ -582,7 +713,8 @@ TIPS=(
   "Tipp: Node-RED-et érdemes systemd service-ként futtatni, hogy bootkor induljon."
   "Tipp: MQTT-hez használj user/jelszó auth-ot és TLS-t éles rendszeren."
   "Tipp: mc-ben F10 a kilépés, F5 másol, F6 mozgat."
-  "Tipp: a Vincseszter dashboard: http://$IP_ADDR/"
+  "Tipp: Vincseszter dashboard: http://$IP_ADDR/"
+  "Tipp: Csak frissítéshez elég a 7-es opciót választani a menüben."
 )
 
 RANDOM_TIP=${TIPS[$RANDOM % ${#TIPS[@]}]}
